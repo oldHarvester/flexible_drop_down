@@ -25,7 +25,7 @@ class _ExamplePageState extends State<ExamplePage> {
         child: Column(
           children: [
             Padding(
-              padding: EdgeInsets.all(20),
+              padding: EdgeInsets.all(16),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: FlexibleDropDown(
@@ -49,7 +49,7 @@ class _ExamplePageState extends State<ExamplePage> {
               ),
             ),
             Container(
-              height: 20000,
+              height: 2000,
               color: Colors.greenAccent,
             ),
           ],

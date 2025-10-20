@@ -6,6 +6,8 @@ import 'package:flutter_toolkit/flutter_toolkit.dart';
 import 'package:uuid/v4.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../widget_position_listener/models/widget_position_metrics.dart';
+
 part 'flexible_drop_down_controller.dart';
 
 part 'flexible_drop_down_data.dart';
@@ -55,8 +57,6 @@ class FlexibleDropDown extends StatefulWidget {
     this.showInitial = false,
     this.tapGroupId,
     this.overrideShow,
-    this.onHoverEnter,
-    this.onHoverExit,
     required this.child,
     required this.targetBuilder,
   });
@@ -75,15 +75,18 @@ class FlexibleDropDown extends StatefulWidget {
   targetBuilder;
   final bool? overrideShow;
   final bool showInitial;
-  final void Function(BuildContext context)? onHoverEnter;
-  final void Function(BuildContext context)? onHoverExit;
 
   @override
   State<FlexibleDropDown> createState() => _FlexibleDropDownState();
 }
 
-class _FlexibleDropDownState extends State<FlexibleDropDown> {
+class _FlexibleDropDownState extends State<FlexibleDropDown>
+    with WidgetsBindingObserver {
   final GlobalKey _followerKey = GlobalKey();
+
+  final GlobalKey _targetKey = GlobalKey();
+
+  final ThrottleExecutor _changeMetricsThrottler = ThrottleExecutor();
 
   late final OverlayPortalController _portalController =
       OverlayPortalController(debugLabel: widget.debugLabel);
@@ -96,6 +99,8 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
 
   final LayerLink _layerLink = LayerLink();
 
+  final Key _visibilityKey = UniqueKey();
+
   FlexibleDropDownDirection get direction =>
       FlexibleDropDownDirection.fromDropDownAlignment(
         followerAnchor: widget.followerAnchor,
@@ -106,14 +111,12 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
 
   final executor = SafeExecutor();
 
-  final UniqueKey _visibilityKey = UniqueKey();
-
   @override
   void initState() {
     super.initState();
     _portalController.show();
     _tapGroupId = widget.tapGroupId ?? const UuidV4().generate();
-    checkOverflow();
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
@@ -165,15 +168,9 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
     );
   }
 
-  void _onEnterHover() {
-    if (!widget.useHoverDetector) return;
-    widget.onHoverEnter?.call(context);
-  }
+  void _onEnterHover() {}
 
-  void _onExitHover() {
-    if (!widget.useHoverDetector) return;
-    widget.onHoverExit?.call(context);
-  }
+  void _onExitHover() {}
 
   SlideApearAnimationType get slideType {
     return switch (direction) {
@@ -201,7 +198,6 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
             _dropDownController.hide();
           }
         },
-
         onTapInside: (event) {
           if (showOnTapInside) {
             _dropDownController.show();
@@ -222,32 +218,12 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
     };
   }
 
-  void checkOverflow() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final followerRenderbox =
-          _followerKey.currentContext?.findRenderObject() as RenderBox?;
-      final screenSize = MediaQuery.of(context).size;
-      if (followerRenderbox == null) return;
-      final followerSize = followerRenderbox.size;
-      final followerPosition =
-          followerRenderbox.localToGlobal(Offset.zero) +
-          Offset(followerSize.width / 2, followerSize.height / 2);
-      final followerRect = Rect.fromCenter(
-        center: followerPosition,
-        height: followerSize.height,
-        width: followerSize.width,
-      );
-      print(
-        'folSize: $followerSize, scrSize: $screenSize, folRect: ${followerRect.topLeft}',
-      );
-    });
-  }
-
   @override
   void dispose() {
     if (widget.controller == null) {
       _dropDownController.dispose();
     }
+    WidgetsBinding.instance.removeObserver(this);
     VisibilityDetectorController.instance.forget(_visibilityKey);
     super.dispose();
   }
@@ -270,6 +246,35 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
     }
   }
 
+  void _checkPosition() {
+    final widgetMetrics = WidgetPositionMetrics.fromContext(
+      _followerKey.currentContext,
+    );
+    if (widgetMetrics == null) {
+      return;
+    }
+    final screenSize = MediaQuery.of(context).size;
+    print(
+      'size: $screenSize, folSize: ${widgetMetrics.size}, folBounds: ${widgetMetrics.bounds}, visible: ${widgetMetrics.visibleBounds(screenSize)}',
+    );
+  }
+
+  void _onMetricsChanged() {
+    _changeMetricsThrottler.execute(
+      onAction: () {
+        if (mounted) {
+          _checkPosition();
+        }
+      },
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    _onMetricsChanged();
+    super.didChangeMetrics();
+  }
+
   @override
   Widget build(BuildContext context) {
     final enableHover = widget.showOnHover || widget.useHoverDetector;
@@ -289,39 +294,48 @@ class _FlexibleDropDownState extends State<FlexibleDropDown> {
               overlayChildBuilder: (context) {
                 return Positioned(
                   left: 0,
-                  right: 0,
-                  child: CompositedTransformFollower(
-                    link: _layerLink,
-                    showWhenUnlinked: false,
-                    offset: dropDownOffset,
-                    targetAnchor: widget.targetAnchor,
-                    followerAnchor: widget.followerAnchor,
-                    child: VisibilityDetector(
-                      key: _visibilityKey,
-                      onVisibilityChanged: (info) {
-                        print('visibility: ${info.visibleFraction}');
-                      },
-                      child: ValueListenableBuilder(
+                  top: 0,
+                  child: KeyedSubtree(
+                    key: _targetKey,
+                    child: CompositedTransformFollower(
+                      link: _layerLink,
+                      showWhenUnlinked: false,
+                      offset: dropDownOffset,
+                      targetAnchor: widget.targetAnchor,
+                      followerAnchor: widget.followerAnchor,
+                      child: KeyedSubtree(
                         key: _followerKey,
-                        valueListenable: _dropDownController,
-                        builder: (context, value, child) {
-                          final show = value.shown;
-                          return AnimatedVisibility(
-                            show: show,
-                            duration: Duration(milliseconds: 400),
-                            child: _showWhenHovered(
-                              isOverlay: true,
-                              enable: enableHover,
-                              child: TapRegion(
-                                groupId: _tapGroupId,
-                                child: widget.targetBuilder(
-                                  context,
-                                  DropDownTargetData(tapGroupId: _tapGroupId),
+                        child: VisibilityDetector(
+                          key: _visibilityKey,
+                          onVisibilityChanged: (info) {
+                            print(
+                              'visibility changed: ${info.visibleFraction}',
+                            );
+                          },
+                          child: ValueListenableBuilder(
+                            valueListenable: _dropDownController,
+                            builder: (context, value, child) {
+                              final show = value.shown;
+                              return SlideApearAnimation(
+                                show: show,
+                                type: slideType,
+                                child: _showWhenHovered(
+                                  isOverlay: true,
+                                  enable: enableHover,
+                                  child: TapRegion(
+                                    groupId: _tapGroupId,
+                                    child: widget.targetBuilder(
+                                      context,
+                                      DropDownTargetData(
+                                        tapGroupId: _tapGroupId,
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          );
-                        },
+                              );
+                            },
+                          ),
+                        ),
                       ),
                     ),
                   ),
