@@ -1,47 +1,15 @@
 import 'dart:developer' as dev;
 
-import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_toolkit/flutter_toolkit.dart';
 import 'package:uuid/v4.dart';
-import 'package:visibility_detector/visibility_detector.dart';
+import 'package:widget_position_listener/widget_position_listener.dart';
 
-import '../widget_position_listener/models/widget_position_metrics.dart';
-
-part 'flexible_drop_down_controller.dart';
-
-part 'flexible_drop_down_data.dart';
+import '../../flexible_drop_down.dart';
 
 // Alignment.bottomCenter, Alignment.topCenter - (0.0, 1.0), (0.0, -1.0)
 
 // Alignment.centerRight, Aligmnent.centerLeft - (1.0, 0.0), (-1.0, 0.0)
-
-enum FlexibleDropDownDirection {
-  down,
-  up,
-  left,
-  right;
-
-  static FlexibleDropDownDirection fromDropDownAlignment({
-    required Alignment followerAnchor,
-    required Alignment targetAnchor,
-  }) {
-    final fx = followerAnchor.x;
-    final fy = followerAnchor.y;
-    final tx = targetAnchor.x;
-    final ty = targetAnchor.y;
-    if (tx == 1 && fx == -1) {
-      return FlexibleDropDownDirection.right;
-    } else if (tx == -1 && fx == 1) {
-      return FlexibleDropDownDirection.left;
-    } else if (ty == -1 && fy == 1) {
-      return FlexibleDropDownDirection.up;
-    } else if (ty == 1 && fy == -1) {
-      return FlexibleDropDownDirection.down;
-    }
-    return FlexibleDropDownDirection.down;
-  }
-}
 
 class FlexibleDropDown extends StatefulWidget {
   const FlexibleDropDown({
@@ -49,8 +17,10 @@ class FlexibleDropDown extends StatefulWidget {
     this.debugLabel,
     this.spacing = 8,
     this.useHoverDetector = true,
-    this.followerAnchor = Alignment.topCenter,
-    this.targetAnchor = Alignment.bottomCenter,
+    this.alignment = const FlexibleDropDownAlignment(
+      followerAnchor: Alignment.topCenter,
+      targetAnchor: Alignment.bottomCenter,
+    ),
     this.controller,
     this.showOnTap = false,
     this.showOnHover = false,
@@ -62,8 +32,7 @@ class FlexibleDropDown extends StatefulWidget {
   });
 
   final FlexibleDropDownController? controller;
-  final Alignment targetAnchor;
-  final Alignment followerAnchor;
+  final FlexibleDropDownAlignment alignment;
   final String? debugLabel;
   final bool showOnHover;
   final bool showOnTap;
@@ -71,7 +40,7 @@ class FlexibleDropDown extends StatefulWidget {
   final String? tapGroupId;
   final Widget child;
   final bool useHoverDetector;
-  final Widget Function(BuildContext context, DropDownTargetData targetData)
+  final Widget Function(BuildContext context, FlexibleDropDownInfo info)
   targetBuilder;
   final bool? overrideShow;
   final bool showInitial;
@@ -86,8 +55,6 @@ class _FlexibleDropDownState extends State<FlexibleDropDown>
 
   final GlobalKey _targetKey = GlobalKey();
 
-  final ThrottleExecutor _changeMetricsThrottler = ThrottleExecutor();
-
   late final OverlayPortalController _portalController =
       OverlayPortalController(debugLabel: widget.debugLabel);
 
@@ -99,12 +66,9 @@ class _FlexibleDropDownState extends State<FlexibleDropDown>
 
   final LayerLink _layerLink = LayerLink();
 
-  final Key _visibilityKey = UniqueKey();
-
   FlexibleDropDownDirection get direction =>
       FlexibleDropDownDirection.fromDropDownAlignment(
-        followerAnchor: widget.followerAnchor,
-        targetAnchor: widget.targetAnchor,
+        alignment: widget.alignment,
       );
 
   late final String _tapGroupId;
@@ -224,7 +188,6 @@ class _FlexibleDropDownState extends State<FlexibleDropDown>
       _dropDownController.dispose();
     }
     WidgetsBinding.instance.removeObserver(this);
-    VisibilityDetectorController.instance.forget(_visibilityKey);
     super.dispose();
   }
 
@@ -246,33 +209,13 @@ class _FlexibleDropDownState extends State<FlexibleDropDown>
     }
   }
 
-  void _checkPosition() {
-    final widgetMetrics = WidgetPositionMetrics.fromContext(
-      _followerKey.currentContext,
-    );
-    if (widgetMetrics == null) {
-      return;
-    }
-    final screenSize = MediaQuery.of(context).size;
+  void onPositionChanged(WidgetPositionState state) {
+    final positionMetrics = state.positionMetrics;
+    final visibleBounds = positionMetrics.visibleBounds();
+    final bounds = positionMetrics.bounds;
     print(
-      'size: $screenSize, folSize: ${widgetMetrics.size}, folBounds: ${widgetMetrics.bounds}, visible: ${widgetMetrics.visibleBounds(screenSize)}',
+      'position changed visible - ${(visibleBounds.size, visibleBounds)}, bounds - ${bounds.size}',
     );
-  }
-
-  void _onMetricsChanged() {
-    _changeMetricsThrottler.execute(
-      onAction: () {
-        if (mounted) {
-          _checkPosition();
-        }
-      },
-    );
-  }
-
-  @override
-  void didChangeMetrics() {
-    _onMetricsChanged();
-    super.didChangeMetrics();
   }
 
   @override
@@ -301,16 +244,15 @@ class _FlexibleDropDownState extends State<FlexibleDropDown>
                       link: _layerLink,
                       showWhenUnlinked: false,
                       offset: dropDownOffset,
-                      targetAnchor: widget.targetAnchor,
-                      followerAnchor: widget.followerAnchor,
+                      targetAnchor: widget.alignment.targetAnchor,
+                      followerAnchor: widget.alignment.followerAnchor,
                       child: KeyedSubtree(
                         key: _followerKey,
-                        child: VisibilityDetector(
-                          key: _visibilityKey,
-                          onVisibilityChanged: (info) {
-                            print(
-                              'visibility changed: ${info.visibleFraction}',
-                            );
+                        child: WidgetPositionListener(
+                          onChange: (id, positionState, type) {
+                            if (type == WidgetPositionUpdatedType.position) {
+                              onPositionChanged(positionState);
+                            }
                           },
                           child: ValueListenableBuilder(
                             valueListenable: _dropDownController,
@@ -326,7 +268,7 @@ class _FlexibleDropDownState extends State<FlexibleDropDown>
                                     groupId: _tapGroupId,
                                     child: widget.targetBuilder(
                                       context,
-                                      DropDownTargetData(
+                                      FlexibleDropDownInfo(
                                         tapGroupId: _tapGroupId,
                                       ),
                                     ),

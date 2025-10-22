@@ -22,37 +22,41 @@ class _ExamplePageState extends State<ExamplePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Padding(
-              padding: EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: FlexibleDropDown(
-                  controller: _tooltipController,
-                  targetAnchor: Alignment.centerLeft,
-                  followerAnchor: Alignment.centerRight,
-                  targetBuilder: (context, targetData) {
-                    return Container(
-                      width: 100,
-                      height: 40,
-                      color: Colors.amber,
-                    );
-                  },
-                  child: ElevatedButton(
-                    onPressed: () {
-                      _tooltipController.toggle();
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.all(16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FlexibleDropDown(
+                    controller: _tooltipController,
+                    alignment: FlexibleDropDownAlignment(
+                      targetAnchor: Alignment.centerLeft,
+                      followerAnchor: Alignment.centerRight,
+                    ),
+                    targetBuilder: (context, targetData) {
+                      return Container(
+                        width: 100,
+                        height: 40,
+                        color: Colors.amber,
+                      );
                     },
-                    child: Text('Open'),
+                    child: ElevatedButton(
+                      onPressed: () {
+                        _tooltipController.toggle();
+                      },
+                      child: Text('Open'),
+                    ),
                   ),
                 ),
               ),
-            ),
-            Container(
-              height: 2000,
-              color: Colors.greenAccent,
-            ),
-          ],
+              Container(
+                height: 2000,
+                color: Colors.greenAccent,
+              ),
+            ],
+          ),
         ),
       ),
     );
